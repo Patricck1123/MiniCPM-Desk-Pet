@@ -1123,6 +1123,7 @@ const _minicpmChat = require("./minicpm-chat")({
   // Effective UI language; used for sidecar error i18n + chat renderer
   // bootstrap + narration system prompts.
   getLang: () => lang,
+  applyState,
 });
 const openMinicpmChat = () => _minicpmChat.open();
 

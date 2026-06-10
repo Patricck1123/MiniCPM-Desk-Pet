@@ -51,8 +51,8 @@ const EDGE_MARGIN = 8;
 
 const ASK_WIDTH = 120;       // initial empty-input width — tiny pill
 const ASK_HEIGHT = 44;
-const SPEAK_MAX_WIDTH = 360;
-const SPEAK_MAX_HEIGHT = 360;
+const SPEAK_MAX_WIDTH = 700;
+const SPEAK_MAX_HEIGHT = 600;
 const MIN_WIDTH = 100;
 const MIN_HEIGHT = 40;
 
@@ -819,6 +819,12 @@ module.exports = function initMinicpmChat(ctx) {
   const host = process.env.MINICPM_HOST || DEFAULT_HOST;
   const log = (msg) => { try { console.log(msg); } catch {} };
 
+  // Chat mode: "normal" (default) or "space-bar" (task flow + LLM hybrid).
+  // Read from minicpm-prefs.json; env var MINICPM_EVENT_MODE overrides.
+  let chatMode = "normal";
+  const _envEventMode = /^(?:1|true|on|space-bar)$/i.test(process.env.MINICPM_EVENT_MODE || "");
+  if (_envEventMode) chatMode = "space-bar";
+
   // ── i18n bridge ──────────────────────────────────────────────────────
   // ctx.getLang() returns the *effective* UI language. Used to translate
   // sidecar errors (raised with a `minicpmI18nKey` annotation) and to
@@ -1371,6 +1377,19 @@ module.exports = function initMinicpmChat(ctx) {
   // Re-clamp bootstrap so a corrupt persisted value (e.g. max_new_tokens
   // outside range) doesn't ride along into runtime.
   chatParams = clampChatParams(chatParams);
+
+  // Bootstrap chatMode from minicpm-prefs.json (env override already applied).
+  if (!_envEventMode) {
+    const _raw = readMinicpmPrefsRaw();
+    if (_raw.chat_mode === "space-bar") chatMode = "space-bar";
+  }
+  function setChatMode(mode) {
+    if (mode !== "normal" && mode !== "space-bar") mode = "normal";
+    chatMode = mode;
+    mergeMinicpmPrefs({ chat_mode: mode });
+    return chatMode;
+  }
+  function getChatMode() { return chatMode; }
   function setChatParams(input) {
     chatParams = clampChatParams(input);
     mergeMinicpmPrefs(chatParams);
@@ -1736,7 +1755,7 @@ module.exports = function initMinicpmChat(ctx) {
     if (!bubble.isVisible()) bubble.show();
     bubble.focus();
     bubbleShown = true;
-    bubble.webContents.send("minicpm:cmd-open", { side: activeSide });
+    bubble.webContents.send("minicpm:cmd-open", { side: activeSide, chatMode });
     // Fire a 1-token warmup so the model weights are paged back into RAM
     // by the time the user finishes typing. Throttled — repeated opens
     // within 30s don't re-warm (model is still hot).
@@ -2226,6 +2245,12 @@ module.exports = function initMinicpmChat(ctx) {
       // Bubble closed → if a coding-agent event was queued during chat,
       // replay it now (subject to the 60s freshness window).
       setTimeout(() => flushQueuedEventIfStale(), 600);
+      return { ok: true };
+    },
+    "minicpm:pet-happy": () => {
+      // Trigger happy/attention animation for 3s, then return to idle
+      if (ctx.applyState) ctx.applyState("attention");
+      setTimeout(() => { if (ctx.applyState) ctx.applyState("idle"); }, 3000);
       return { ok: true };
     },
     "minicpm:update-status": async () => {
@@ -2836,6 +2861,12 @@ module.exports = function initMinicpmChat(ctx) {
       } catch (err) {
         return { ok: false, error: String(err && err.message || err) };
       }
+    },
+
+    "minicpm-settings:get-chat-mode": async () => ({ mode: getChatMode() }),
+    "minicpm-settings:set-chat-mode": async (_evt, payload) => {
+      const mode = setChatMode(payload && payload.mode);
+      return { ok: true, mode };
     },
 
     "minicpm-settings:get-chat-params": async () => ({

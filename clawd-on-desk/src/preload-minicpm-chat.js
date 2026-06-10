@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld("minicpm", {
   showWindow: () => ipcRenderer.invoke("minicpm:show-window"),
   focusWindow: () => ipcRenderer.invoke("minicpm:focus-window"),
   openContextMenu: () => ipcRenderer.send("minicpm:open-context-menu"),
+  petHappy: () => ipcRenderer.invoke("minicpm:pet-happy"),
 
   // Updater
   updateStatus: () => ipcRenderer.invoke("minicpm:update-status"),

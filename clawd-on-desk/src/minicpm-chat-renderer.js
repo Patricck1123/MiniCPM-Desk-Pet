@@ -74,6 +74,11 @@ let inputEl = null;          // <textarea> while in ask state
 // Tracks the latest remote revision shown in the update pill so we can
 // re-render its label on a language change without losing the version.
 let updPillRevision = null;
+// Space bar task flow: intercepts task-related inputs, falls through to
+// LLM chat for everything else. Activated when eventMode is true.
+const spaceBarApi = (typeof globalThis !== "undefined" && globalThis.ClawdSpaceBarTaskFlow) || null;
+const spaceBarFlow = spaceBarApi ? new spaceBarApi.SpaceBarTaskFlow() : null;
+let eventMode = false;  // true when chatMode === "space-bar"
 
 // Persisted default lives in minicpm-prefs.json (Settings → 默认思考模式).
 // thinkingOverride is a per-session override from ⌘⇧T; null means follow
@@ -195,7 +200,7 @@ async function showAsk(lastReply) {
     inputEl = document.getElementById("ask-input");
     inputEl.addEventListener("input", () => autoresizeFixed(inputEl));
     inputEl.addEventListener("keydown", onAskKey);
-    await measureAndShow();
+    await measureAndShow({ width: naturalDisplayWidth(lastReply, { min: 360, max: 660 }) });
     const lr = document.getElementById("last-reply-region");
     if (lr) lr.scrollTop = lr.scrollHeight;
     // Now that the bubble is sized & placed, pin its bottom Y so future
@@ -287,7 +292,7 @@ async function showSpeak() {
   phase = "speak";
   await clearChatAnchor();
   content.innerHTML = `<div class="speak streaming" id="speak"></div>`;
-  await measureAndShow({ width: 300 });
+  await measureAndShow({ width: 380 });
 }
 
 // Animate the bubble fading out, briefly drop the window, then fade it back
@@ -427,14 +432,14 @@ function naturalAskWidth(text) {
   widthMeasurer.style.font = window.getComputedStyle(content).font;
   widthMeasurer.textContent = sample;
   const textW = widthMeasurer.offsetWidth;
-  return Math.max(80, Math.min(320, Math.round(textW + 32)));
+  return Math.max(80, Math.min(660, Math.round(textW + 32)));
 }
 
 // For fixed-text panels (command replies, errors, narration, speak phase, …)
 // the bubble should be wide enough to read comfortably without breaking
 // short prompts onto multiple lines. Measures the longest line of `text`
 // and clamps to a comfortable range.
-function naturalDisplayWidth(text, { min = 220, max = 320, padding = 32 } = {}) {
+function naturalDisplayWidth(text, { min = 280, max = 660, padding = 32 } = {}) {
   const lines = String(text || "").split(/\r?\n/);
   widthMeasurer.style.font = window.getComputedStyle(content).font;
   let widest = 0;
@@ -454,18 +459,30 @@ async function showCommandReply(cmd) {
   const escaped = escapeHtml(text);
   const accent = cmd.ok === false ? "#ff6b6b" : "var(--accent)";
   content.innerHTML = `
-    <div style="display:flex; gap:6px; align-items:flex-start;">
+    <div style="display:flex; gap:6px; align-items:flex-start;${cmd.autoClose ? "cursor:pointer;" : ""}">
       <span style="font-size:13px; line-height:1; color:${accent}; padding-top:1px;">🐾</span>
       <span style="font-size:13px; color:var(--text); white-space:pre-wrap; word-wrap:break-word;">${escaped}</span>
     </div>`;
   // +30 padding for the icon column so multi-line replies don't wrap
   // tighter than the icon alignment.
   await measureAndShow({ animate: true, width: naturalDisplayWidth(text, { min: 240, padding: 56 }) });
-  const dwell = clamp(2800 + text.length * 100, 3500, 11000);
-  fadeTimer = setTimeout(() => {
-    fadeTimer = null;
-    hideBubble({ fade: true });
-  }, dwell);
+  if (cmd.autoClose) {
+    // Click to dismiss immediately
+    const dismiss = () => { clearFade(); hideBubble({ fade: true }); };
+    bubble.addEventListener("click", dismiss, { once: true });
+    const ms = typeof cmd.autoClose === "number" ? cmd.autoClose : 5000;
+    fadeTimer = setTimeout(() => {
+      bubble.removeEventListener("click", dismiss);
+      fadeTimer = null;
+      hideBubble({ fade: true });
+    }, ms);
+  } else {
+    const dwell = clamp(2800 + text.length * 100, 3500, 11000);
+    fadeTimer = setTimeout(() => {
+      fadeTimer = null;
+      hideBubble({ fade: true });
+    }, dwell);
+  }
 }
 
 // Same visual as showCommandReply, but pinned in place — no fade — used
@@ -804,8 +821,42 @@ async function runAdapterSwitchByKeyword(keyword, fullMessage, progress) {
 }
 
 async function submit(text) {
+  // ── Space bar task flow interceptor ──
+  // When eventMode is on, try to match task-related inputs (self-intro,
+  // swap task, complete, reset). Handled replies render directly.
+  // Unhandled inputs fall through to command intents / LLM chat.
+  if (eventMode && spaceBarFlow) {
+    const result = spaceBarFlow.handle(text);
+    if (result && result.handled) {
+      history.push({ role: "user", content: text });
+      history.push({ role: "assistant", content: result.reply });
+      if (result.completed) {
+        await showCommandReply({ ok: true, text: result.reply, autoClose: 5000 });
+        if (window.minicpm && window.minicpm.petHappy) {
+          try { window.minicpm.petHappy(); } catch {}
+        }
+      } else {
+        await showAsk(result.reply);
+      }
+      return;
+    }
+    // handled=false: not a task command, fall through to LLM chat below
+    // If sidecar is not available, give a friendly fallback reply
+    // instead of showing a connection error.
+    if (!booted) {
+      history.push({ role: "user", content: text });
+      const fallback = "赛博小猫正在休息中，暂时不能自由聊天哦～先去完成大冒险任务吧！";
+      history.push({ role: "assistant", content: fallback });
+      await showAsk(fallback);
+      return;
+    }
+  }
+
   // Try command intents first. If matched, render the result as the
   // assistant turn and skip the model call entirely.
+  // In eventMode, skip command intents to avoid misrouting task-related
+  // inputs (e.g. "换一下" → persona switch). Only LLM chat is allowed.
+  if (!eventMode) {
   try {
     const cmd = await tryHandleAsCommand(text, async (progressText) => {
       // Show interim progress immediately so the user knows the request
@@ -828,6 +879,7 @@ async function submit(text) {
   } catch (err) {
     console.error("command dispatch error:", err);
   }
+  } // end eventMode gate for command intents
 
   history.push({ role: "user", content: text });
 
@@ -873,12 +925,22 @@ async function submit(text) {
   // <think> block doesn't consume the whole generation budget.
   const maxNewTokens = chatParams.max_new_tokens || 768;
 
+  // Build messages payload: inject space bar system prompt when in event
+  // mode so the LLM speaks as the cyber cat with task context.
+  let messagesPayload = history;
+  if (eventMode && spaceBarFlow) {
+    messagesPayload = [
+      { role: "system", content: spaceBarFlow.getSystemPrompt() },
+      ...history,
+    ];
+  }
+
   try {
     const resp = await fetch(sidecarUrl + "/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        messages: history,
+        messages: messagesPayload,
         stream: true,
         max_new_tokens: maxNewTokens,
         temperature: (typeof chatParams.temperature === "number") ? chatParams.temperature : 0.6,
@@ -1095,7 +1157,14 @@ async function showToast(text) {
 }
 
 if (window.minicpm) {
-  if (window.minicpm.onOpen) window.minicpm.onOpen(cmdOpen);
+  if (window.minicpm.onOpen) window.minicpm.onOpen(async (payload) => {
+    eventMode = !!(payload && payload.chatMode === "space-bar" && spaceBarFlow);
+    if (eventMode) {
+      await showAsk(spaceBarFlow.onOpen());
+      return;
+    }
+    await cmdOpen(payload);
+  });
   if (window.minicpm.onDismiss) window.minicpm.onDismiss(cmdDismiss);
   if (window.minicpm.onReset) window.minicpm.onReset(cmdReset);
   if (window.minicpm.onToggleThinking) window.minicpm.onToggleThinking(async () => {

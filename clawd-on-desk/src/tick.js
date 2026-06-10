@@ -289,6 +289,7 @@ function runMainTickOnce() {
           idleLookReturnTimer = null;
           if (isMouseIdle && ctx.currentState === "idle") {
             isMouseIdle = false;
+            idleLookPlayed = false;
             ctx.sendToRenderer("state-change", "idle", SVG_IDLE_FOLLOW);
             ctx.sendToHitWin("hit-state-sync", { currentSvg: SVG_IDLE_FOLLOW });
             setTimeout(() => { ctx.forceEyeResend = true; }, 200);

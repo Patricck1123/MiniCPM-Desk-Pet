@@ -137,6 +137,8 @@ contextBridge.exposeInMainWorld("minicpmSettings", {
   getChatParams: () => ipcRenderer.invoke("minicpm-settings:get-chat-params"),
   setChatParams: (params) => ipcRenderer.invoke("minicpm-settings:set-chat-params", { params }),
   resetChatParams: () => ipcRenderer.invoke("minicpm-settings:reset-chat-params"),
+  getChatMode: () => ipcRenderer.invoke("minicpm-settings:get-chat-mode"),
+  setChatMode: (mode) => ipcRenderer.invoke("minicpm-settings:set-chat-mode", { mode }),
   getBubblePos: () => ipcRenderer.invoke("minicpm-settings:get-bubble-pos"),
   setBubblePos: (pos) => ipcRenderer.invoke("minicpm-settings:set-bubble-pos", { pos }),
   resetBubblePos: () => ipcRenderer.invoke("minicpm-settings:reset-bubble-pos"),

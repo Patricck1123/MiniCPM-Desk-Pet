@@ -343,6 +343,43 @@
       },
     ));
 
+    // Chat mode segmented control: Normal chat vs Space Bar event mode
+    let currentChatMode = "normal";
+    try {
+      const modeResult = await window.minicpmSettings.getChatMode();
+      currentChatMode = (modeResult && modeResult.mode) || "normal";
+    } catch {}
+    {
+      const row = el("div", { className: "row" });
+      const text = el("div", { className: "row-text" });
+      text.appendChild(el("span", { className: "row-label" }, t("minicpmRowChatMode")));
+      text.appendChild(el("span", { className: "row-desc" }, t("minicpmRowChatModeDesc")));
+      row.appendChild(text);
+      const segmented = el("div", { className: "segmented minicpm-chatmode-segmented" });
+      for (const [value, label] of [["normal", t("minicpmChatModeNormal")], ["space-bar", t("minicpmChatModeSpaceBar")]]) {
+        const btn = el("button", {
+          type: "button",
+          className: currentChatMode === value ? "active" : "",
+          onClick: async () => {
+            if (btn.disabled || currentChatMode === value) return;
+            Array.from(segmented.querySelectorAll("button")).forEach((b) => { b.disabled = true; });
+            try {
+              const ret = await window.minicpmSettings.setChatMode(value);
+              currentChatMode = (ret && ret.mode) || value;
+              Array.from(segmented.querySelectorAll("button")).forEach((b) => {
+                b.classList.toggle("active", b.dataset.mode === currentChatMode);
+                b.disabled = false;
+              });
+            } catch {}
+          },
+        }, label);
+        btn.dataset.mode = value;
+        segmented.appendChild(btn);
+      }
+      row.appendChild(segmented);
+      rows.appendChild(row);
+    }
+
     const backendMode = window.minicpmSettings.getBackendMode
       ? window.minicpmSettings.getBackendMode()
       : null;

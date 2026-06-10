@@ -57,9 +57,17 @@
   "sleepingHitboxFiles": ["cybercat-sleeping.gif"],
 
   "timings": {
-    "mouseIdleTimeout": 20000,
+    "mouseIdleTimeout": 10000,
     "mouseSleepTimeout": 60000
   },
+
+  "idleAnimations": [
+    { "file": "cybercat-invitation.gif", "duration": 4000 },
+    { "file": "cybercat-drinking.gif", "duration": 3400 },
+    { "file": "cybercat-cleaning.gif", "duration": 5100 },
+    { "file": "cybercat-shaking.gif", "duration": 3800 },
+    { "file": "cybercat-menu.gif", "duration": 2800 }
+  ],
 
   "miniMode": {
     "supported": true,
